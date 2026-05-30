@@ -4,7 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface ConfettiButtonProps {
-  onSuccess: () => void;
+  onSuccess: (key: string) => void;
 }
 
 const RANDOM_PROMPTS = [
@@ -69,7 +69,7 @@ export const ConfettiButton: React.FC<ConfettiButtonProps> = ({ onSuccess }) => 
       });
       // Trigger the page transition!
       setTimeout(() => {
-        onSuccess();
+        onSuccess(passwordInput);
       }, 800);
     } else {
       setError(true);

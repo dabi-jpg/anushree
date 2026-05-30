@@ -13,6 +13,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isBirthdayModeOpen, setIsBirthdayModeOpen] = useState(false);
   const [showWritingPad, setShowWritingPad] = useState(false);
+  const [decryptionKey, setDecryptionKey] = useState("");
 
   // Load login state from session storage so it doesn't prompt for password on refresh.
   useEffect(() => {
@@ -50,7 +51,7 @@ function App() {
             exit={{ opacity: 0, x: -100 }}
             transition={{ duration: 0.5, ease: "easeInOut" }}
           >
-            <WritingPad onBack={() => setShowWritingPad(false)} />
+            <WritingPad decryptionKey={decryptionKey} onBack={() => setShowWritingPad(false)} />
           </motion.div>
         ) : (
           <motion.div
@@ -86,7 +87,12 @@ function App() {
                   <AudioPlayer />
 
                   {/* Do Not Press Confetti Warning */}
-                  <ConfettiButton onSuccess={() => setShowWritingPad(true)} />
+                  <ConfettiButton
+                    onSuccess={(key) => {
+                      setDecryptionKey(key);
+                      setShowWritingPad(true);
+                    }}
+                  />
 
                   {/* Cute Footnote */}
                   <footer className="py-12 bg-white border-t-8 border-teal-accent text-center font-vietnam select-none">
@@ -98,6 +104,9 @@ function App() {
                     </p>
                     <p className="text-[11px] font-press-start font-black uppercase tracking-widest mt-4 animate-pulse text-[#39FF14]" style={{ textShadow: "0 0 10px #39FF14, 0 0 20px #39FF14" }}>
                       PS You should be an Influencer
+                    </p>
+                    <p className="text-[10px] font-press-start font-black uppercase tracking-wider mt-4 animate-pulse text-[#00FFFF]" style={{ textShadow: "0 0 10px #00FFFF, 0 0 20px #00FFFF" }}>
+                      SaNa,Manvi,Ditae Please send what you have to say to my instagram nxrxnjxnn Thank you
                     </p>
                   </footer>
                 </motion.div>
