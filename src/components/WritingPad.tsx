@@ -4,56 +4,10 @@ import { BIRTHDAY_CONFIG } from "../config";
 import { motion } from "framer-motion";
 
 interface WritingPadProps {
-  decryptionKey: string;
   onBack: () => void;
 }
 
-// Client-side RC4 Decryption Routine
-function decryptLetter(key: string, encryptedHex: string) {
-  try {
-    // Hex to binary string conversion
-    const binary = String.fromCharCode(
-      ...encryptedHex.match(/.{1,2}/g)!.map((val) => parseInt(val, 16))
-    );
-
-    // RC4 setup
-    let s = [], j = 0, x, res = "";
-    for (let i = 0; i < 256; i++) {
-      s[i] = i;
-    }
-    for (let i = 0; i < 256; i++) {
-      j = (j + s[i] + key.charCodeAt(i % key.length)) % 256;
-      x = s[i];
-      s[i] = s[j];
-      s[j] = x;
-    }
-    let i = 0;
-    j = 0;
-    for (let y = 0; y < binary.length; y++) {
-      i = (i + 1) % 256;
-      j = (j + s[i]) % 256;
-      x = s[i];
-      s[i] = s[j];
-      s[j] = x;
-      res += String.fromCharCode(binary.charCodeAt(y) ^ s[(s[i] + s[j]) % 256]);
-    }
-    return JSON.parse(res);
-  } catch (e) {
-    console.error("Decryption failed", e);
-    return null;
-  }
-}
-
-interface LetterPayload {
-  header: string;
-  body: string[];
-}
-
-export const WritingPad: React.FC<WritingPadProps> = ({ decryptionKey, onBack }) => {
-  const decrypted: LetterPayload | null = decryptLetter(
-    decryptionKey,
-    BIRTHDAY_CONFIG.ENCRYPTED_LETTER
-  );
+export const WritingPad: React.FC<WritingPadProps> = ({ onBack }) => {
 
   return (
     <div className="bg-cream min-h-screen text-on-surface select-none relative overflow-x-hidden font-jakarta pb-24">
@@ -111,39 +65,26 @@ export const WritingPad: React.FC<WritingPadProps> = ({ decryptionKey, onBack })
           </div>
 
           <div className="p-6 min-h-[420px] flex flex-col relative bg-white notebook-lines overflow-y-auto max-h-[500px] select-text">
-            {decrypted ? (
-              <div className="w-full flex-grow text-gray-800 font-vietnam text-xs leading-[2.2rem] whitespace-pre-line p-0">
-                <p className="font-bold text-sm mb-4 text-pink-primary font-jakarta uppercase tracking-wide">
-                  {decrypted.header}
-                </p>
-                {decrypted.body.map((paragraph, index) => {
-                  if (paragraph.startsWith("Love,") || paragraph.startsWith("PS:")) {
-                    return (
-                      <p key={index} className="mt-6 font-semibold whitespace-pre-line">
-                        {paragraph}
-                      </p>
-                    );
-                  }
+            <div className="w-full flex-grow text-gray-800 font-vietnam text-xs leading-[2.2rem] whitespace-pre-line p-0">
+              <p className="font-bold text-sm mb-4 text-pink-primary font-jakarta uppercase tracking-wide">{BIRTHDAY_CONFIG.LETTER.header}</p>
+              {BIRTHDAY_CONFIG.LETTER.body.map((paragraph, index) => {
+                if (paragraph.startsWith("Love,") || paragraph.startsWith("PS:")) {
                   return (
-                    <p key={index} className="mb-6 indent-4">
+                    <p key={index} className="mt-6 font-semibold whitespace-pre-line">
                       {paragraph}
                     </p>
                   );
-                })}
-                <p className="mt-8 font-press-start text-[9px] text-pink-primary animate-pulse font-black uppercase tracking-widest text-center border-2 border-dashed border-pink-primary p-3 bg-pink-primary/5 shadow-retro-pink-sm">
-                  ✨ Yes you should be a Influencer ✨
-                </p>
-              </div>
-            ) : (
-              <div className="w-full flex-grow flex flex-col items-center justify-center text-center p-6 gap-3">
-                <p className="font-press-start text-[10px] text-red-500 uppercase animate-pulse">
-                  Decryption Failed
-                </p>
-                <p className="font-vietnam text-xs text-teal-accent uppercase font-bold tracking-wider max-w-[250px]">
-                  The letter text is secure. Please enter the correct key to unlock.
-                </p>
-              </div>
-            )}
+                }
+                return (
+                  <p key={index} className="mb-6 indent-4">
+                    {paragraph}
+                  </p>
+                );
+              })}
+              <p className="mt-8 font-press-start text-[9px] text-pink-primary animate-pulse font-black uppercase tracking-widest text-center border-2 border-dashed border-pink-primary p-3 bg-pink-primary/5 shadow-retro-pink-sm">
+                ✨ Yes you should be a Influencer ✨
+              </p>
+            </div>
 
             {/* Bottom Decor */}
             <div className="mt-6 flex justify-between items-center text-teal-accent/60 border-t border-dashed border-teal-accent/25 pt-4">
