@@ -96,6 +96,9 @@ function App() {
                     <p className="text-[8px] text-pink-primary font-bold uppercase tracking-widest">
                       Special thanks to Bijin, Ditae, and Neha for helping with this! ❤️
                     </p>
+                    <p className="text-[11px] font-press-start font-black uppercase tracking-widest mt-4 animate-pulse text-[#39FF14]" style={{ textShadow: "0 0 10px #39FF14, 0 0 20px #39FF14" }}>
+                      PS You should be an Influencer
+                    </p>
                   </footer>
                 </motion.div>
               )}
