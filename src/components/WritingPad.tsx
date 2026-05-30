@@ -81,6 +81,9 @@ export const WritingPad: React.FC<WritingPadProps> = ({ onBack }) => {
                   </p>
                 );
               })}
+              <p className="mt-8 font-press-start text-[9px] text-pink-primary animate-pulse font-black uppercase tracking-widest text-center border-2 border-dashed border-pink-primary p-3 bg-pink-primary/5 shadow-retro-pink-sm">
+                ✨ Yes you should be a Influencer ✨
+              </p>
             </div>
 
             {/* Bottom Decor */}
