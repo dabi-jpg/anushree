@@ -33,22 +33,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRetryTrigger(prev => prev + 1);
   }, []);
 
-  // Ensure user profile and conversation member exist using database RPC
+  // Ensure user profile and conversation member exist using direct queries
   const ensureProfileAndConversation = useCallback(async (userId: string, email: string) => {
     try {
-      console.log('[Auth] Ensuring profile & conversation for user:', email);
-      const { data, error } = await supabase.rpc('ensure_profile_and_conversation' as any, {
-        p_user_id: userId,
-        p_email: email,
-      });
+      console.log('[Auth] [ensureProfileAndConversation] Starting check for user:', email, 'ID:', userId);
 
-      if (error) {
-        console.error('[Auth] Error calling ensure_profile_and_conversation rpc:', error);
+      // 1. Lookup profile by auth user id
+      console.log('[Auth] [SELECT] Querying profile table for user ID:', userId);
+      const { data: profile, error: selectError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      console.log('[Auth] [SELECT] Querying profile table finished. Data:', profile, 'Error:', selectError);
+
+      if (selectError) {
+        console.error('[Auth] Error querying profiles:', selectError);
         return null;
       }
 
-      console.log('[Auth] ensure_profile_and_conversation rpc succeeded. Profile returned:', data?.profile);
-      return data?.profile as Profile;
+      let currentProfile = profile;
+
+      // 2. If profile does not exist: INSERT profile
+      if (!currentProfile) {
+        const displayName = email.split('@')[0] || email;
+        console.log('[Auth] [INSERT] Profile not found. Inserting profile for ID:', userId, 'Email:', email, 'DisplayName:', displayName);
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: userId,
+            email: email,
+            display_name: displayName,
+          });
+        console.log('[Auth] [INSERT] Insert profile query finished. Error:', insertError);
+
+        if (insertError) {
+          console.error('[Auth] Error inserting profile:', insertError.message);
+          return null;
+        }
+
+        // 3. Fetch profile again
+        console.log('[Auth] [SELECT] Fetching profile again for user ID:', userId);
+        const { data: refetchedProfile, error: refetchError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        console.log('[Auth] [SELECT] Fetching profile again finished. Data:', refetchedProfile, 'Error:', refetchError);
+
+        if (refetchError) {
+          console.error('[Auth] Error refetching profile:', refetchError);
+          return null;
+        }
+        currentProfile = refetchedProfile;
+      }
+
+      // 4. Ensure conversation membership check runs in the background
+      console.log('[Auth] [RPC ensure_profile_and_conversation] Start background RPC check...');
+      supabase.rpc('ensure_profile_and_conversation' as any, {
+        p_user_id: userId,
+        p_email: email,
+      }).then(
+        ({ data, error }) => {
+          console.log('[Auth] [RPC ensure_profile_and_conversation] Finished background RPC check. Data:', data, 'Error:', error);
+        },
+        (err: any) => {
+          console.error('[Auth] Background RPC check exception:', err);
+        }
+      );
+
+      return currentProfile;
     } catch (err) {
       console.error('[Auth] Exception in ensureProfileAndConversation:', err);
       return null;

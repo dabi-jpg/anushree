@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion } from 'framer-motion';
 
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoading, initError, retryInit } = useAuth();
+  const { user, isLoading, initError, retryInit, signOut } = useAuth();
 
   if (initError) {
     return (
@@ -23,9 +23,15 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
           </p>
           <button
             onClick={retryInit}
-            className="w-full py-3 bg-teal-accent text-white font-press-start text-[9px] uppercase border-2 border-teal-accent hover:bg-white hover:text-teal-accent transition-all duration-200 shadow-retro-pink-sm cursor-pointer active:translate-x-1 active:translate-y-1 active:shadow-none"
+            className="w-full py-3 mb-3 bg-teal-accent text-white font-press-start text-[9px] uppercase border-2 border-teal-accent hover:bg-white hover:text-teal-accent transition-all duration-200 shadow-retro-pink-sm cursor-pointer active:translate-x-1 active:translate-y-1 active:shadow-none"
           >
             Retry Connection
+          </button>
+          <button
+            onClick={signOut}
+            className="w-full py-3 bg-pink-primary text-white font-press-start text-[9px] uppercase border-2 border-pink-primary hover:bg-white hover:text-pink-primary transition-all duration-200 shadow-retro-teal-sm cursor-pointer active:translate-x-1 active:translate-y-1 active:shadow-none"
+          >
+            Sign Out / Log In As Other
           </button>
         </motion.div>
       </div>
