@@ -40,17 +40,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('[Auth] [ensureProfileAndConversation] Step 1: Lookup profile by auth user id. User:', email, 'ID:', userId);
 
       // 1. Lookup profile by auth user id
-      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * starting for ID:', userId);
       const selectPromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-      const { data: profile, error: selectError } = await selectPromise;
-      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * completed. Result:', { profile, selectError });
+
+      const timeoutPromise = new Promise<any>((_, reject) =>
+        setTimeout(() => reject(new Error('Query timeout after 5 seconds')), 5000)
+      );
+
+      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * starting for ID:', userId);
+      let selectResult: any;
+      try {
+        selectResult = await Promise.race([selectPromise, timeoutPromise]);
+        console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * completed. Status:', selectResult?.status, 'Data:', selectResult?.data, 'Error:', selectResult?.error);
+      } catch (err: any) {
+        console.error('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * failed or timed out. Exception:', err);
+        selectResult = { data: null, error: err, status: 0 };
+      }
+
+      const profile = selectResult?.data;
+      const selectError = selectResult?.error;
 
       if (selectError) {
-        console.error('[Auth] Error querying profiles:', selectError);
+        console.error('[Auth] Error querying profiles, skipping creation:', selectError);
         return null;
       }
 
