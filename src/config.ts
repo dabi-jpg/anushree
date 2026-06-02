@@ -19,9 +19,6 @@ export interface AchievementItem {
 }
 
 export const BIRTHDAY_CONFIG = {
-  // The correct password (as defined in the Stitch login screen mockup)
-  PASSWORD: "LogitechG402@",
-  
   // Target birthday date. Since local time is May 31, 2026, setting it to today makes it active.
   // If set in the future, the countdown will display.
   BIRTHDAY_DATE: "2026-05-31T00:00:00",
