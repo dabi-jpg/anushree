@@ -17,30 +17,54 @@ export function useChat() {
 
   // Fetch the single conversation ID
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      console.log('[Chat] No user session found. Skipping conversation fetch.');
+      setIsLoading(false);
+      return;
+    }
+    
     mountedRef.current = true;
+    console.log('[Chat] Fetching conversation ID for user:', user.email);
+    setIsLoading(true);
 
     const fetchConversation = async () => {
-      const { data, error } = await supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', user.id)
-        .limit(1)
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from('conversation_members')
+          .select('conversation_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .single();
 
-      if (error) {
-        console.error('Error fetching conversation:', error);
-        return;
-      }
+        if (error) {
+          console.error('[Chat] Error fetching conversation membership:', error);
+          if (mountedRef.current) {
+            setIsLoading(false);
+          }
+          return;
+        }
 
-      if (data && mountedRef.current) {
-        setConversationId(data.conversation_id);
+        if (data && mountedRef.current) {
+          console.log('[Chat] Successfully retrieved conversation ID:', data.conversation_id);
+          setConversationId(data.conversation_id);
+        } else if (mountedRef.current) {
+          console.warn('[Chat] Conversation membership was empty.');
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error('[Chat] Exception in fetchConversation:', err);
+        if (mountedRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchConversation();
 
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      console.log('[Chat] useChat unmounted.');
+    };
   }, [user]);
 
   // Decrypt a message content
@@ -50,67 +74,95 @@ export function useChat() {
       const key = await getEncryptionKey();
       if (!key) return content;
       return await decrypt(content, key);
-    } catch {
+    } catch (err) {
+      console.error('[Chat] Decryption exception:', err);
       return content;
     }
   }, []);
 
   // Fetch messages with attachments
   const fetchMessages = useCallback(async (before?: string) => {
-    if (!conversationId || !user) return;
-
-    let query = supabase
-      .from('messages')
-      .select(`
-        *,
-        attachments (*),
-        read_receipts (*)
-      `)
-      .eq('conversation_id', conversationId)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(PAGE_SIZE);
-
-    if (before) {
-      query = query.lt('created_at', before);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error fetching messages:', error);
+    if (!conversationId || !user) {
+      console.log('[Chat] fetchMessages skipped (missing conversationId or user).');
+      setIsLoading(false);
       return;
     }
 
-    if (!data || !mountedRef.current) return;
+    console.log('[Chat] Fetching messages. conversation:', conversationId, 'before:', before);
 
-    if (data.length < PAGE_SIZE) {
-      setHasMore(false);
+    try {
+      let query = supabase
+        .from('messages')
+        .select(`
+          *,
+          attachments (*),
+          read_receipts (*)
+        `)
+        .eq('conversation_id', conversationId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE);
+
+      if (before) {
+        query = query.lt('created_at', before);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('[Chat] Error loading messages from database:', error);
+        if (mountedRef.current) {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      if (!data) {
+        console.warn('[Chat] Query returned no messages data.');
+        if (mountedRef.current) {
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      if (!mountedRef.current) return;
+
+      console.log(`[Chat] Loaded ${data.length} messages.`);
+
+      if (data.length < PAGE_SIZE) {
+        setHasMore(false);
+      }
+
+      // Decrypt messages
+      const decryptedMessages = await Promise.all(
+        (data as any[]).map(async (msg) => {
+          const decryptedContent = msg.message_type === 'text'
+            ? await decryptMessage(msg.content)
+            : msg.content;
+
+          return {
+            ...msg,
+            content: decryptedContent,
+            attachments: msg.attachments || [],
+            read_receipts: msg.read_receipts || [],
+          } as MessageWithAttachment;
+        })
+      );
+
+      if (mountedRef.current) {
+        if (before) {
+          setMessages(prev => [...prev, ...decryptedMessages.reverse()]);
+        } else {
+          setMessages(decryptedMessages.reverse());
+        }
+      }
+    } catch (err) {
+      console.error('[Chat] Exception fetching messages:', err);
+    } finally {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-
-    // Decrypt messages
-    const decryptedMessages = await Promise.all(
-      (data as any[]).map(async (msg) => {
-        const decryptedContent = msg.message_type === 'text'
-          ? await decryptMessage(msg.content)
-          : msg.content;
-
-        return {
-          ...msg,
-          content: decryptedContent,
-          attachments: msg.attachments || [],
-          read_receipts: msg.read_receipts || [],
-        } as MessageWithAttachment;
-      })
-    );
-
-    if (before) {
-      setMessages(prev => [...prev, ...decryptedMessages.reverse()]);
-    } else {
-      setMessages(decryptedMessages.reverse());
-    }
-
-    setIsLoading(false);
   }, [conversationId, user, decryptMessage]);
 
   // Initial fetch
@@ -124,6 +176,8 @@ export function useChat() {
   useEffect(() => {
     if (!conversationId || !user) return;
 
+    console.log('[Chat] Creating realtime subscription channel for messages:', conversationId);
+
     const channel = supabase
       .channel(`messages:${conversationId}`)
       .on(
@@ -135,30 +189,41 @@ export function useChat() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         async (payload) => {
+          console.log('[Chat] Realtime message insert event received:', payload.new.id);
           const newMsg = payload.new as any;
 
-          // Fetch attachments for this message
-          const { data: attachments } = await supabase
-            .from('attachments')
-            .select('*')
-            .eq('message_id', newMsg.id);
+          try {
+            // Fetch attachments for this message
+            const { data: attachments, error } = await supabase
+              .from('attachments')
+              .select('*')
+              .eq('message_id', newMsg.id);
 
-          const decryptedContent = newMsg.message_type === 'text'
-            ? await decryptMessage(newMsg.content)
-            : newMsg.content;
+            if (error) {
+              console.error('[Chat] Error fetching realtime message attachments:', error);
+            }
 
-          const fullMessage: MessageWithAttachment = {
-            ...newMsg,
-            content: decryptedContent,
-            attachments: (attachments as Attachment[]) || [],
-            read_receipts: [],
-          };
+            const decryptedContent = newMsg.message_type === 'text'
+              ? await decryptMessage(newMsg.content)
+              : newMsg.content;
 
-          setMessages(prev => {
-            // Avoid duplicates (from optimistic updates)
-            if (prev.some(m => m.id === fullMessage.id)) return prev;
-            return [...prev, fullMessage];
-          });
+            const fullMessage: MessageWithAttachment = {
+              ...newMsg,
+              content: decryptedContent,
+              attachments: (attachments as Attachment[]) || [],
+              read_receipts: [],
+            };
+
+            if (mountedRef.current) {
+              setMessages(prev => {
+                // Avoid duplicates (from optimistic updates)
+                if (prev.some(m => m.id === fullMessage.id)) return prev;
+                return [...prev, fullMessage];
+              });
+            }
+          } catch (err) {
+            console.error('[Chat] Exception handling realtime message payload:', err);
+          }
         }
       )
       .on(
@@ -169,25 +234,31 @@ export function useChat() {
           table: 'read_receipts',
         },
         (payload) => {
+          console.log('[Chat] Realtime read receipt event received:', payload.new.id);
           const receipt = payload.new as any;
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === receipt.message_id
-                ? {
-                    ...msg,
-                    read_receipts: [
-                      ...(msg.read_receipts || []),
-                      receipt,
-                    ],
-                  }
-                : msg
-            )
-          );
+          if (mountedRef.current) {
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === receipt.message_id
+                  ? {
+                      ...msg,
+                      read_receipts: [
+                        ...(msg.read_receipts || []),
+                        receipt,
+                      ],
+                    }
+                  : msg
+              )
+            );
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[Chat] Realtime subscription status is: ${status}`);
+      });
 
     return () => {
+      console.log('[Chat] Disconnecting realtime channel for messages:', conversationId);
       supabase.removeChannel(channel);
     };
   }, [conversationId, user, decryptMessage]);
@@ -198,8 +269,12 @@ export function useChat() {
     messageType: 'text' | 'image' | 'video' | 'voice' = 'text',
     attachmentData?: { path: string; fileType: string; fileSize: number; bucket: string }
   ): Promise<{ error: string | null }> => {
-    if (!conversationId || !user) return { error: 'Not connected' };
+    if (!conversationId || !user) {
+      console.error('[Chat] Failed to send message: conversationId or user is null.');
+      return { error: 'Not connected' };
+    }
 
+    console.log('[Chat] Sending message of type:', messageType);
     setIsSending(true);
 
     try {
@@ -229,11 +304,15 @@ export function useChat() {
         .single();
 
       if (msgError) {
+        console.error('[Chat] Error inserting message:', msgError);
         return { error: msgError.message };
       }
 
+      console.log('[Chat] Message inserted successfully:', messageData.id);
+
       // Insert attachment if provided
       if (attachmentData && messageData) {
+        console.log('[Chat] Inserting message attachment:', attachmentData.path);
         const { error: attachError } = await supabase
           .from('attachments')
           .insert({
@@ -245,21 +324,25 @@ export function useChat() {
           });
 
         if (attachError) {
-          console.error('Error inserting attachment:', attachError);
+          console.error('[Chat] Error inserting attachment:', attachError);
         }
       }
 
       return { error: null };
-    } catch {
-      return { error: 'Failed to send message' };
+    } catch (err: any) {
+      console.error('[Chat] Exception in sendMessage:', err);
+      return { error: err.message || 'Failed to send message' };
     } finally {
-      setIsSending(false);
+      if (mountedRef.current) {
+        setIsSending(false);
+      }
     }
   }, [conversationId, user]);
 
   // Load more messages (pagination)
   const loadMore = useCallback(() => {
     if (messages.length > 0 && hasMore) {
+      console.log('[Chat] Loading more messages before:', messages[0].created_at);
       fetchMessages(messages[0].created_at);
     }
   }, [messages, hasMore, fetchMessages]);
@@ -269,12 +352,16 @@ export function useChat() {
     if (!conversationId || !user) return;
 
     try {
-      await supabase.rpc('mark_messages_read' as any, {
+      console.log('[Chat] Marking conversation messages as read...');
+      const { error } = await supabase.rpc('mark_messages_read' as any, {
         p_conversation_id: conversationId,
         p_user_id: user.id,
       });
+      if (error) {
+        console.error('[Chat] Error in mark_messages_read RPC:', error);
+      }
     } catch (err) {
-      console.error('Error marking messages as read:', err);
+      console.error('[Chat] Exception in markAsRead:', err);
     }
   }, [conversationId, user]);
 

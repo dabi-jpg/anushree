@@ -187,3 +187,55 @@ CREATE TRIGGER on_new_message_update_conversation
   AFTER INSERT ON public.messages
   FOR EACH ROW
   EXECUTE FUNCTION public.update_conversation_timestamp();
+
+-- ============================================================
+-- Ensure user profile and conversation member row exist
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.ensure_profile_and_conversation(
+  p_user_id UUID,
+  p_email TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  conv_id UUID;
+  user_display_name TEXT;
+  profile_row RECORD;
+  member_row RECORD;
+BEGIN
+  -- Verify email is in allowlist
+  IF NOT EXISTS (SELECT 1 FROM public.allowed_emails WHERE email = p_email) THEN
+    RAISE EXCEPTION 'Email not in allowlist: %', p_email;
+  END IF;
+
+  -- Ensure we have a conversation created
+  SELECT id INTO conv_id FROM public.conversations LIMIT 1;
+  IF conv_id IS NULL THEN
+    INSERT INTO public.conversations DEFAULT VALUES
+    RETURNING id INTO conv_id;
+  END IF;
+
+  -- Get display name
+  user_display_name := public.get_display_name(p_email);
+
+  -- Create profile if missing
+  INSERT INTO public.profiles (id, email, display_name)
+  VALUES (p_user_id, p_email, user_display_name)
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email, display_name = COALESCE(profiles.display_name, EXCLUDED.display_name)
+  RETURNING * INTO profile_row;
+
+  -- Add to the conversation if missing
+  INSERT INTO public.conversation_members (conversation_id, user_id)
+  VALUES (conv_id, p_user_id)
+  ON CONFLICT (conversation_id, user_id) DO NOTHING
+  RETURNING * INTO member_row;
+
+  RETURN jsonb_build_object(
+    'profile', to_jsonb(profile_row),
+    'conversation_id', conv_id
+  );
+END;
+$$;

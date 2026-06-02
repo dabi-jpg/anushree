@@ -36,19 +36,36 @@ export const ChatPage: React.FC = () => {
   // Fetch other user's profile
   useEffect(() => {
     if (!user) return;
+    let mounted = true;
 
     const fetchOtherProfile = async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .neq('id', user.id)
-        .limit(1)
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .neq('id', user.id)
+          .limit(1)
+          .single();
 
-      if (data) setOtherProfile(data as Profile);
+        if (error) {
+          console.error('[ChatPage] Error fetching other user profile:', error);
+          return;
+        }
+
+        if (data && mounted) {
+          console.log('[ChatPage] Loaded other user profile:', data.display_name);
+          setOtherProfile(data as Profile);
+        }
+      } catch (err) {
+        console.error('[ChatPage] Exception in fetchOtherProfile:', err);
+      }
     };
 
     fetchOtherProfile();
+
+    return () => {
+      mounted = false;
+    };
   }, [user]);
 
   // Mark messages as read when the page is visible
