@@ -25,6 +25,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [retryTrigger, setRetryTrigger] = useState(0);
+  const activeUserIdRef = React.useRef<string | null>(null);
 
   const retryInit = useCallback(() => {
     console.log('[Auth] Retrying initialization...');
@@ -151,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) {
           if (currentSession?.user) {
             console.log('[Auth] [initAuth] Found active user session:', currentSession.user.email);
+            activeUserIdRef.current = currentSession.user.id;
             setSession(currentSession);
             setUser(currentSession.user);
 
@@ -182,6 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           } else {
             console.log('[Auth] [initAuth] No active session found.');
+            activeUserIdRef.current = null;
             setSession(null);
             setUser(null);
             setProfile(null);
@@ -209,10 +212,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         console.log('[Auth] [onAuthStateChange] triggered:', event, newSession?.user?.email);
 
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
-
         if (newSession?.user) {
+          // Prevent duplicate profile checks during initialization/redundant state events
+          if (activeUserIdRef.current === newSession.user.id) {
+            console.log('[Auth] [onAuthStateChange] Session already initialized for user. Skipping duplicate profile load.');
+            setSession(newSession);
+            setUser(newSession.user);
+            return;
+          }
+          activeUserIdRef.current = newSession.user.id;
+          setSession(newSession);
+          setUser(newSession.user);
+
           console.log('[Auth] [onAuthStateChange] [AWAIT] ensureProfileAndConversation starting...');
           const profilePromise = ensureProfileAndConversation(
             newSession.user.id,
@@ -237,11 +248,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setInitError(null);
           }
         } else {
+          activeUserIdRef.current = null;
+          setSession(null);
+          setUser(null);
           setProfile(null);
         }
 
         if (event === 'SIGNED_OUT') {
           console.log('[Auth] User signed out. Clearing local states.');
+          activeUserIdRef.current = null;
           setProfile(null);
           setInitError(null);
           sessionStorage.removeItem('chat_encryption_key');

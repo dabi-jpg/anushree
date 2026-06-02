@@ -179,8 +179,7 @@ CREATE POLICY "Users can read allowed profiles"
   ON public.profiles FOR SELECT
   TO authenticated
   USING (
-    email IN (SELECT email FROM public.allowed_emails)
-    AND (SELECT auth.jwt() ->> 'email') IN (SELECT email FROM public.allowed_emails)
+    (SELECT auth.jwt() ->> 'email') IN (SELECT email FROM public.allowed_emails)
   );
 
 CREATE POLICY "Users can update own profile"
@@ -258,10 +257,10 @@ CREATE POLICY "Members can read attachments"
   ON public.attachments FOR SELECT
   TO authenticated
   USING (
-    message_id IN (
-      SELECT m.id FROM public.messages m
+    EXISTS (
+      SELECT 1 FROM public.messages m
       JOIN public.conversation_members cm ON cm.conversation_id = m.conversation_id
-      WHERE cm.user_id = auth.uid()
+      WHERE m.id = message_id AND cm.user_id = auth.uid()
     )
   );
 
@@ -280,10 +279,10 @@ CREATE POLICY "Members can read receipts"
   ON public.read_receipts FOR SELECT
   TO authenticated
   USING (
-    message_id IN (
-      SELECT m.id FROM public.messages m
+    EXISTS (
+      SELECT 1 FROM public.messages m
       JOIN public.conversation_members cm ON cm.conversation_id = m.conversation_id
-      WHERE cm.user_id = auth.uid()
+      WHERE m.id = message_id AND cm.user_id = auth.uid()
     )
   );
 
@@ -292,10 +291,10 @@ CREATE POLICY "Members can mark messages read"
   TO authenticated
   WITH CHECK (
     user_id = auth.uid()
-    AND message_id IN (
-      SELECT m.id FROM public.messages m
+    AND EXISTS (
+      SELECT 1 FROM public.messages m
       JOIN public.conversation_members cm ON cm.conversation_id = m.conversation_id
-      WHERE cm.user_id = auth.uid()
+      WHERE m.id = message_id AND cm.user_id = auth.uid()
     )
   );
 

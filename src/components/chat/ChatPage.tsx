@@ -12,11 +12,14 @@ import { ChatInput } from './ChatInput';
 import { supabase } from '../../lib/supabase';
 import type { Profile } from '../../types/database';
 
+// Global in-memory cache to prevent redundant database fetches during navigation
+let cachedOtherProfile: Profile | null = null;
+
 export const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { initiateCall } = useVoiceCall();
-  const [otherProfile, setOtherProfile] = useState<Profile | null>(null);
+  const [otherProfile, setOtherProfile] = useState<Profile | null>(cachedOtherProfile);
 
   const {
     messages,
@@ -36,6 +39,12 @@ export const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     let mounted = true;
+
+    if (cachedOtherProfile) {
+      console.log('[ChatPage] Using cached other profile:', cachedOtherProfile.display_name);
+      setOtherProfile(cachedOtherProfile);
+      return;
+    }
 
     const fetchOtherProfile = async () => {
       try {
@@ -58,7 +67,8 @@ export const ChatPage: React.FC = () => {
 
         if (data && mounted) {
           console.log('[ChatPage] Loaded other user profile:', data.display_name);
-          setOtherProfile(data as Profile);
+          cachedOtherProfile = data as Profile;
+          setOtherProfile(cachedOtherProfile);
         }
       } catch (err) {
         console.error('[ChatPage] Exception in fetchOtherProfile:', err);
@@ -72,13 +82,25 @@ export const ChatPage: React.FC = () => {
     };
   }, [user]);
 
-  // Mark messages as read when the page is visible
+  const lastMessage = messages[messages.length - 1];
+  const lastMessageId = lastMessage?.id;
+  const lastMessageSenderId = lastMessage?.sender_id;
+
+  // Mark messages as read when the conversation changes or on mount
+  useEffect(() => {
+    if (conversationId && user) {
+      markAsRead();
+    }
+  }, [conversationId, user, markAsRead]);
+
+  // Mark messages as read when tab becomes visible or a new message from peer arrives
   useEffect(() => {
     if (!conversationId || !user) return;
 
-    markAsRead();
+    if (lastMessageSenderId && lastMessageSenderId !== user.id) {
+      markAsRead();
+    }
 
-    // Mark as read when tab becomes visible
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         markAsRead();
@@ -87,7 +109,7 @@ export const ChatPage: React.FC = () => {
 
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [conversationId, user, messages.length, markAsRead]);
+  }, [conversationId, user, lastMessageId, lastMessageSenderId, markAsRead]);
 
   // Format last seen
   const formatLastSeen = () => {

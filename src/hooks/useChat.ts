@@ -2,14 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { encrypt, decrypt, getEncryptionKey, generateChecksum } from '../lib/encryption';
-import type { MessageWithAttachment, Attachment } from '../types/database';
+import type { MessageWithAttachment } from '../types/database';
 
 const PAGE_SIZE = 50;
+
+// Global in-memory cache to prevent redundant database fetches during navigation
+let cachedConversationId: string | null = null;
 
 export function useChat() {
   const { user } = useAuth();
   const [messages, setMessages] = useState<MessageWithAttachment[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(cachedConversationId);
   const [isLoading, setIsLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [isSending, setIsSending] = useState(false);
@@ -24,6 +27,14 @@ export function useChat() {
     }
     
     mountedRef.current = true;
+    
+    if (cachedConversationId) {
+      console.log('[Chat] Using cached conversation ID:', cachedConversationId);
+      setConversationId(cachedConversationId);
+      setIsLoading(false);
+      return;
+    }
+
     console.log('[Chat] Fetching conversation ID for user:', user.email);
     setIsLoading(true);
 
@@ -50,6 +61,7 @@ export function useChat() {
 
         if (data && mountedRef.current) {
           console.log('[Chat] Successfully retrieved conversation ID:', data.conversation_id);
+          cachedConversationId = data.conversation_id;
           setConversationId(data.conversation_id);
         } else if (mountedRef.current) {
           console.warn('[Chat] Conversation membership was empty.');
@@ -212,18 +224,32 @@ export function useChat() {
           console.log('[Chat] Realtime message insert event received:', payload.new.id);
           const newMsg = payload.new as any;
 
-          try {
-            // Fetch attachments for this message
-            console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments starting...');
-            const attachmentPromise = supabase
-              .from('attachments')
-              .select('*')
-              .eq('message_id', newMsg.id);
-            const { data: attachments, error } = await attachmentPromise;
-            console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments finished. Result:', { attachments, error });
+          // If the message was sent by the current user, it is already optimistic and complete
+          if (newMsg.sender_id === user.id) {
+            console.log('[Chat] Realtime INSERT for own message. Updating status to sent.');
+            if (mountedRef.current) {
+              setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, status: 'sent' } : m));
+            }
+            return;
+          }
 
-            if (error) {
-              console.error('[Chat] Error fetching realtime message attachments:', error);
+          try {
+            let attachments: any[] = [];
+            // Only fetch attachments if the message is NOT a text message
+            if (newMsg.message_type !== 'text') {
+              console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments starting...');
+              const attachmentPromise = supabase
+                .from('attachments')
+                .select('*')
+                .eq('message_id', newMsg.id);
+              const { data, error } = await attachmentPromise;
+              console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments finished. Result:', { data, error });
+
+              if (error) {
+                console.error('[Chat] Error fetching realtime message attachments:', error);
+              } else if (data) {
+                attachments = data;
+              }
             }
 
             console.log('[Chat] [realtime INSERT] [AWAIT] decrypting message starting...');
@@ -235,14 +261,17 @@ export function useChat() {
             const fullMessage: MessageWithAttachment = {
               ...newMsg,
               content: decryptedContent,
-              attachments: (attachments as Attachment[]) || [],
+              attachments: attachments,
               read_receipts: [],
+              status: 'sent'
             };
 
             if (mountedRef.current) {
               setMessages(prev => {
-                // Avoid duplicates (from optimistic updates)
-                if (prev.some(m => m.id === fullMessage.id)) return prev;
+                // Avoid duplicates
+                if (prev.some(m => m.id === fullMessage.id)) {
+                  return prev.map(m => m.id === fullMessage.id ? { ...m, status: 'sent' } : m);
+                }
                 return [...prev, fullMessage];
               });
             }
@@ -302,6 +331,35 @@ export function useChat() {
     console.log('[Chat] Sending message of type:', messageType);
     setIsSending(true);
 
+    const tempId = crypto.randomUUID();
+
+    // 1. Create optimistic local message
+    const tempMsg: MessageWithAttachment = {
+      id: tempId,
+      conversation_id: conversationId,
+      sender_id: user.id,
+      content: content || null,
+      message_type: messageType,
+      created_at: new Date().toISOString(),
+      edited_at: null,
+      deleted_at: null,
+      checksum: null,
+      attachments: attachmentData ? [{
+        id: crypto.randomUUID(),
+        message_id: tempId,
+        storage_path: attachmentData.path,
+        file_type: attachmentData.fileType,
+        file_size: attachmentData.fileSize,
+        created_at: new Date().toISOString(),
+        metadata: { bucket: attachmentData.bucket }
+      }] : [],
+      read_receipts: [],
+      status: 'sending'
+    };
+
+    // Render immediately (Perceived latency: 0ms)
+    setMessages(prev => [...prev, tempMsg]);
+
     try {
       let encryptedContent = content;
       let checksum: string | null = null;
@@ -315,10 +373,11 @@ export function useChat() {
         }
       }
 
-      // Insert message
+      // 2. Insert message in background
       const { data: messageData, error: msgError } = await supabase
         .from('messages')
         .insert({
+          id: tempId,
           conversation_id: conversationId,
           sender_id: user.id,
           content: encryptedContent || null,
@@ -330,12 +389,15 @@ export function useChat() {
 
       if (msgError) {
         console.error('[Chat] Error inserting message:', msgError);
+        setMessages(prev =>
+          prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m)
+        );
         return { error: msgError.message };
       }
 
       console.log('[Chat] Message inserted successfully:', messageData.id);
 
-      // Insert attachment if provided
+      // 3. Insert attachment if provided
       if (attachmentData && messageData) {
         console.log('[Chat] Inserting message attachment:', attachmentData.path);
         const { error: attachError } = await supabase
@@ -353,9 +415,17 @@ export function useChat() {
         }
       }
 
+      // Update status to 'sent'
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m)
+      );
+
       return { error: null };
     } catch (err: any) {
       console.error('[Chat] Exception in sendMessage:', err);
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m)
+      );
       return { error: err.message || 'Failed to send message' };
     } finally {
       if (mountedRef.current) {

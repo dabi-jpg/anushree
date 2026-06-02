@@ -11,43 +11,49 @@ interface MessageBubbleProps {
   isMine: boolean;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine }) => {
+export const MessageBubble = React.memo(({ message, isMine }: MessageBubbleProps) => {
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null);
+  const [hasBeenPlayed, setHasBeenPlayed] = useState(false);
 
   const attachment = message.attachments?.[0];
   const isRead = (message.read_receipts?.length ?? 0) > 0;
   const timestamp = format(new Date(message.created_at), 'h:mm a');
 
-  // Fetch signed URL for attachments
+  // Fetch signed URL for attachments (cached in getSignedUrl)
   useEffect(() => {
     if (!attachment) return;
+    let active = true;
 
     const fetchUrl = async () => {
       const bucket = (attachment.metadata as any)?.bucket as BucketName;
       if (!bucket) return;
 
       const url = await getSignedUrl(bucket, attachment.storage_path);
-      if (url) setMediaUrl(url);
+      if (url && active) setMediaUrl(url);
     };
 
     fetchUrl();
-
-    // Refresh URL every 4 minutes (URLs expire in 5)
-    const refreshInterval = setInterval(fetchUrl, 4 * 60 * 1000);
-    return () => clearInterval(refreshInterval);
+    return () => {
+      active = false;
+    };
   }, [attachment]);
 
   const toggleAudio = () => {
-    if (!audioRef) return;
-    if (isAudioPlaying) {
-      audioRef.pause();
-    } else {
-      audioRef.play();
-    }
-    setIsAudioPlaying(!isAudioPlaying);
+    setHasBeenPlayed(true);
+    setIsAudioPlaying(prev => {
+      const nextPlay = !prev;
+      if (audioRef) {
+        if (nextPlay) {
+          audioRef.play().catch(err => console.error('[Audio] Play failed:', err));
+        } else {
+          audioRef.pause();
+        }
+      }
+      return nextPlay;
+    });
   };
 
   const renderContent = () => {
@@ -143,8 +149,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine })
               </span>
             )}
 
-            {mediaUrl && (
+            {hasBeenPlayed && mediaUrl && (
               <audio
+                autoPlay
                 ref={(el) => setAudioRef(el)}
                 src={mediaUrl}
                 onEnded={() => setIsAudioPlaying(false)}
@@ -185,8 +192,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine })
               {timestamp}
             </span>
             {isMine && (
-              <span className={`${isRead ? 'text-blue-400' : 'text-teal-accent/30'}`}>
-                {isRead ? <CheckCheck size={12} /> : <Check size={12} />}
+              <span className="flex items-center">
+                {message.status === 'sending' && (
+                  <span className="text-teal-accent/30 animate-pulse text-[9px] font-vietnam lowercase">sending...</span>
+                )}
+                {message.status === 'failed' && (
+                  <span className="text-red-500 font-bold text-[9px] font-vietnam uppercase" title="Failed to send.">failed</span>
+                )}
+                {(!message.status || message.status === 'sent') && (
+                  <span className={`${isRead ? 'text-blue-400' : 'text-teal-accent/30'}`}>
+                    {isRead ? <CheckCheck size={12} /> : <Check size={12} />}
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -204,4 +221,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine })
       )}
     </>
   );
-};
+}, (prev, next) => {
+  return (
+    prev.isMine === next.isMine &&
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.message.message_type === next.message.message_type &&
+    prev.message.read_receipts?.length === next.message.read_receipts?.length &&
+    prev.message.status === next.message.status
+  );
+});
+
+MessageBubble.displayName = 'MessageBubble';

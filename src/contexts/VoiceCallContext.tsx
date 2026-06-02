@@ -87,8 +87,8 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
 
   // Send a signal broadcast helper
   const sendSignal = useCallback(async (peerId: string, event: string, payload: any) => {
-    console.log(`[CALL] [SIGNALING] Sending signal: "${event}" to peer: ${peerId}`, payload);
-    const peerChannel = supabase.channel(`calls_tx_${Date.now()}`);
+    console.log(`[CALL] [SIGNALING] Sending signal: "${event}" to peer: ${peerId}. SessionId: ${payload.sessionId}. SenderId: ${user?.id}`);
+    const peerChannel = supabase.channel(`calls:${peerId}`);
     peerChannel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         peerChannel.send({
@@ -99,7 +99,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
             ...payload
           }
         }).then(() => {
-          console.log(`[CALL] [SIGNALING] Signal broadcast success: "${event}"`);
+          console.log(`[CALL] [SIGNALING] Signal broadcast success: "${event}" to peer: ${peerId}`);
           supabase.removeChannel(peerChannel);
         });
       }
@@ -376,12 +376,12 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    console.log(`[CALL] [SIGNALING] Subscribing to personal signaling channel: calls:${user.id}`);
     const channelName = `calls:${user.id}`;
+    console.log(`[CALL] [SIGNALING] Subscribing to personal signaling channel: ${channelName} (signaling subscription started)`);
     
     const myChannel = supabase.channel(channelName)
       .on('broadcast', { event: 'call_offer' }, async ({ payload }) => {
-        console.log('[CALL] [SIGNALING] Received call_offer signal:', payload);
+        console.log(`[CALL] [SIGNALING] Received signal: "call_offer" on channel: ${channelName}. Event type: call_offer. Sender ID: ${payload.callerId}, Receiver ID: ${user.id}, Session ID: ${payload.sessionId}`);
         
         // Fetch caller profile
         const { data: profile } = await supabase
@@ -409,7 +409,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
         }, 30000);
       })
       .on('broadcast', { event: 'call_answer' }, async ({ payload }) => {
-        console.log('[CALL] [SIGNALING] Received call_answer signal:', payload);
+        console.log(`[CALL] [SIGNALING] Received signal: "call_answer" on channel: ${channelName}. Event type: call_answer. Sender ID: ${payload.senderId}, Receiver ID: ${user.id}, Session ID: ${payload.sessionId}`);
         if (pcRef.current) {
           console.log('[CALL] [WEBRTC] Setting remote description (SDP answer) from receiver.');
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
@@ -432,7 +432,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .on('broadcast', { event: 'ice_candidate' }, async ({ payload }) => {
-        console.log('[CALL] [ICE] Received remote ICE Candidate:', payload.candidate?.candidate);
+        console.log(`[CALL] [SIGNALING] Received signal: "ice_candidate" on channel: ${channelName}. Event type: ice_candidate. Sender ID: ${payload.senderId}, Receiver ID: ${user.id}, Session ID: ${payload.sessionId}`);
         if (pcRef.current && pcRef.current.remoteDescription) {
           await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
         } else {
@@ -441,47 +441,65 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
           pendingCandidatesRef.current.push(payload.candidate);
         }
       })
-      .on('broadcast', { event: 'call_reject' }, () => {
-        console.log('[CALL] [SIGNALING] Received call_reject signal.');
+      .on('broadcast', { event: 'call_reject' }, ({ payload }) => {
+        console.log(`[CALL] [SIGNALING] Received signal: "call_reject" on channel: ${channelName}. Event type: call_reject. Session ID: ${payload?.sessionId}`);
         resetLocalCallState();
       })
-      .on('broadcast', { event: 'call_end' }, () => {
-        console.log('[CALL] [SIGNALING] Received call_end signal.');
+      .on('broadcast', { event: 'call_end' }, ({ payload }) => {
+        console.log(`[CALL] [SIGNALING] Received signal: "call_end" on channel: ${channelName}. Event type: call_end. Session ID: ${payload?.sessionId}`);
         resetLocalCallState();
       });
 
     myChannel.subscribe((status) => {
-      console.log(`[CALL] [SIGNALING] personal channel subscription status: ${status}`);
+      console.log(`[CALL] [SIGNALING] personal channel subscription status: ${status} for channel: ${channelName}`);
+      if (status === 'SUBSCRIBED') {
+        console.log(`[CALL] [SIGNALING] personal channel subscription successful: ${channelName}`);
+      }
     });
 
     myChannelRef.current = myChannel;
 
     return () => {
-      console.log(`[CALL] [SIGNALING] Unsubscribing from personal channel: calls:${user.id}`);
+      console.log(`[CALL] [SIGNALING] Unsubscribing from personal channel: ${channelName}`);
       supabase.removeChannel(myChannel);
       resetLocalCallState();
     };
   }, [user, resetLocalCallState, updateSessionStatus, sendSignal]);
 
+  const contextValue = React.useMemo(() => ({
+    callState,
+    localStream,
+    remoteStream,
+    isMuted,
+    callDuration,
+    peerProfile,
+    activeCallSession,
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    permissionError,
+    clearPermissionError
+  }), [
+    callState,
+    localStream,
+    remoteStream,
+    isMuted,
+    callDuration,
+    peerProfile,
+    activeCallSession,
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    permissionError,
+    clearPermissionError
+  ]);
+
   return (
-    <VoiceCallContext.Provider
-      value={{
-        callState,
-        localStream,
-        remoteStream,
-        isMuted,
-        callDuration,
-        peerProfile,
-        activeCallSession,
-        initiateCall,
-        acceptCall,
-        rejectCall,
-        endCall,
-        toggleMute,
-        permissionError,
-        clearPermissionError
-      }}
-    >
+    <VoiceCallContext.Provider value={contextValue}>
       {children}
     </VoiceCallContext.Provider>
   );

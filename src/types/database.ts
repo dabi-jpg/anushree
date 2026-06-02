@@ -208,4 +208,5 @@ export interface MessageWithAttachment extends Message {
   attachments: Attachment[];
   sender_profile?: Profile;
   read_receipts?: ReadReceipt[];
+  status?: 'sending' | 'sent' | 'failed';
 }

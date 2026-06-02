@@ -15,7 +15,7 @@ interface MessageListProps {
   otherTypingName: string;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
+export const MessageList = React.memo<MessageListProps>(({
   messages,
   currentUserId,
   isLoading,
@@ -73,18 +73,21 @@ export const MessageList: React.FC<MessageListProps> = ({
   };
 
   // Group messages by date
-  const groupedMessages: { date: string; messages: MessageWithAttachment[] }[] = [];
-  let currentDate = '';
+  const groupedMessages = React.useMemo(() => {
+    const groups: { date: string; messages: MessageWithAttachment[] }[] = [];
+    let currentDate = '';
 
-  messages.forEach((msg) => {
-    const msgDate = format(new Date(msg.created_at), 'yyyy-MM-dd');
-    if (msgDate !== currentDate) {
-      currentDate = msgDate;
-      groupedMessages.push({ date: msg.created_at, messages: [msg] });
-    } else {
-      groupedMessages[groupedMessages.length - 1].messages.push(msg);
-    }
-  });
+    messages.forEach((msg) => {
+      const msgDate = format(new Date(msg.created_at), 'yyyy-MM-dd');
+      if (msgDate !== currentDate) {
+        currentDate = msgDate;
+        groups.push({ date: msg.created_at, messages: [msg] });
+      } else {
+        groups[groups.length - 1].messages.push(msg);
+      }
+    });
+    return groups;
+  }, [messages]);
 
   return (
     <div
@@ -162,4 +165,16 @@ export const MessageList: React.FC<MessageListProps> = ({
       <div ref={bottomRef} />
     </div>
   );
-};
+}, (prev, next) => {
+  return (
+    prev.isLoading === next.isLoading &&
+    prev.hasMore === next.hasMore &&
+    prev.isOtherTyping === next.isOtherTyping &&
+    prev.otherTypingName === next.otherTypingName &&
+    prev.currentUserId === next.currentUserId &&
+    prev.messages.length === next.messages.length &&
+    prev.messages === next.messages
+  );
+});
+
+MessageList.displayName = 'MessageList';

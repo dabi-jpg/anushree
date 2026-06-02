@@ -91,6 +91,12 @@ export async function uploadFile(
   return { path: filePath, error: null };
 }
 
+interface CacheEntry {
+  url: string;
+  expiresAt: number;
+}
+const signedUrlCache = new Map<string, CacheEntry>();
+
 /**
  * Get a short-lived signed URL for a file (5 minutes default)
  */
@@ -99,6 +105,15 @@ export async function getSignedUrl(
   path: string,
   expiresIn: number = 300 // 5 minutes
 ): Promise<string | null> {
+  const cacheKey = `${bucket}:${path}`;
+  const now = Date.now();
+  const cached = signedUrlCache.get(cacheKey);
+
+  // Return cached URL if it exists and has at least 30 seconds of life remaining
+  if (cached && cached.expiresAt > now + 30000) {
+    return cached.url;
+  }
+
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(path, expiresIn);
@@ -108,7 +123,15 @@ export async function getSignedUrl(
     return null;
   }
 
-  return data.signedUrl;
+  if (data?.signedUrl) {
+    signedUrlCache.set(cacheKey, {
+      url: data.signedUrl,
+      expiresAt: now + (expiresIn * 1000)
+    });
+    return data.signedUrl;
+  }
+
+  return null;
 }
 
 /**
@@ -140,8 +163,26 @@ export function stripImageMetadata(file: File): Promise<File> {
 
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      const MAX_WIDTH = 1200;
+      const MAX_HEIGHT = 1200;
+      let width = img.naturalWidth;
+      let height = img.naturalHeight;
+
+      // Maintain aspect ratio while constraining dimensions
+      if (width > height) {
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+      } else {
+        if (height > MAX_HEIGHT) {
+          width = Math.round((width * MAX_HEIGHT) / height);
+          height = MAX_HEIGHT;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
 
       const ctx = canvas.getContext('2d');
       if (!ctx) {
@@ -150,7 +191,7 @@ export function stripImageMetadata(file: File): Promise<File> {
         return;
       }
 
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, width, height);
       URL.revokeObjectURL(url);
 
       canvas.toBlob(
@@ -162,7 +203,7 @@ export function stripImageMetadata(file: File): Promise<File> {
           }
         },
         file.type,
-        0.92 // quality
+        0.80 // reduced quality for optimal load times
       );
     };
 
