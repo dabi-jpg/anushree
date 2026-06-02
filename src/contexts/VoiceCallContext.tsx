@@ -49,6 +49,15 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myChannelRef = useRef<any>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  
+  // Track sender channels and their queues
+  const senderChannelsRef = useRef<{ 
+    [key: string]: { 
+      channel: any; 
+      status: string; 
+      queue: Array<{ message: any; resolve: () => void }> 
+    } 
+  }>({});
 
   // Cleanup helper
   const resetLocalCallState = useCallback(() => {
@@ -83,31 +92,70 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
     setPeerProfile(null);
     setActiveCallSession(null);
     pendingCandidatesRef.current = [];
+
+    // Clean up any sender channels
+    Object.values(senderChannelsRef.current).forEach((data: any) => {
+      console.log(`[CALL] [SIGNALING] Cleaning up sender channel: ${data.channel.topic}`);
+      supabase.removeChannel(data.channel);
+      // Resolve any pending items so they don't hang
+      data.queue.forEach((item: any) => item.resolve());
+    });
+    senderChannelsRef.current = {};
   }, []);
 
   // Send a signal broadcast helper
-  const sendSignal = useCallback(async (peerId: string, event: string, payload: any) => {
-    const targetChannel = `calls:${peerId}`;
-    console.log(`[CALL] [SIGNALING] Preparing signal: "${event}" to peer: ${peerId}. SessionId: ${payload.sessionId}. SenderId: ${user?.id}. Channel name used: ${targetChannel}. Payload:`, payload);
-    const peerChannel = supabase.channel(targetChannel);
-    peerChannel.subscribe((status) => {
-      console.log(`[CALL] [SIGNALING] sendSignal subscribe status: ${status} for channel: ${targetChannel}`);
-      if (status === 'SUBSCRIBED') {
-        console.log(`[CALL] [SIGNALING] Channel ${targetChannel} SUBSCRIBED. Dispatching payload...`);
-        peerChannel.send({
-          type: 'broadcast',
-          event,
-          payload: {
-            senderId: user?.id,
-            ...payload
+  const sendSignal = useCallback((peerId: string, event: string, payload: any): Promise<void> => {
+    return new Promise((resolve) => {
+      const targetChannel = `calls:${peerId}`;
+      let senderData = senderChannelsRef.current[targetChannel];
+
+      const message = {
+        type: 'broadcast',
+        event,
+        payload: {
+          senderId: user?.id,
+          ...payload
+        }
+      };
+
+      if (!senderData) {
+        console.log(`[CALL] [SIGNALING] Preparing new sender channel for signal "${event}" to ${targetChannel}`);
+        const channel = supabase.channel(targetChannel);
+        senderData = { channel, status: 'joining', queue: [] };
+        senderChannelsRef.current[targetChannel] = senderData;
+
+        senderData.queue.push({ message, resolve });
+
+        channel.subscribe((status) => {
+          console.log(`[CALL] [SIGNALING] Sender channel ${targetChannel} status: ${status}`);
+          if (senderChannelsRef.current[targetChannel]) {
+            senderChannelsRef.current[targetChannel].status = status;
           }
-        }).then(() => {
-          console.log(`[CALL] [SIGNALING] Signal broadcast success: "${event}" to peer: ${peerId}. Queueing channel removal after 1000ms...`);
-          setTimeout(() => {
-            console.log(`[CALL] [SIGNALING] Removing sender channel subscription for: ${targetChannel}`);
-            supabase.removeChannel(peerChannel);
-          }, 1000);
+          
+          if (status === 'SUBSCRIBED') {
+            console.log(`[CALL] [SIGNALING] Channel ${targetChannel} SUBSCRIBED. Flushing ${senderData.queue.length} pending messages...`);
+            while (senderData.queue.length > 0) {
+              const item = senderData.queue.shift();
+              if (item) {
+                channel.send(item.message).then(() => item.resolve());
+              }
+            }
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn(`[CALL] [SIGNALING] Channel ${targetChannel} failed to join. Clearing queue.`);
+            while (senderData.queue.length > 0) {
+              const item = senderData.queue.shift();
+              if (item) item.resolve();
+            }
+          }
         });
+      } else {
+        if (senderData.status === 'SUBSCRIBED') {
+          console.log(`[CALL] [SIGNALING] Reusing SUBSCRIBED sender channel for signal "${event}" to ${targetChannel}`);
+          senderData.channel.send(message).then(() => resolve());
+        } else {
+          console.log(`[CALL] [SIGNALING] Queueing signal "${event}" to ${targetChannel} (status: ${senderData.status})`);
+          senderData.queue.push({ message, resolve });
+        }
       }
     });
   }, [user]);
@@ -227,7 +275,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
       callTimeoutRef.current = setTimeout(async () => {
         console.log('[CALL] Call went unanswered for 30s. Triggering missed call.');
         await updateSessionStatus(session.id, 'missed', { ended_at: new Date().toISOString() });
-        sendSignal(receiverId, 'call_end', { sessionId: session.id });
+        await sendSignal(receiverId, 'call_end', { sessionId: session.id });
         resetLocalCallState();
       }, 30000);
 
@@ -245,7 +293,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
     console.log(`[CALL] Rejecting call session: ${activeCallSession.id}`);
     
     await updateSessionStatus(activeCallSession.id, 'rejected', { ended_at: new Date().toISOString() });
-    sendSignal(peerId, 'call_reject', { sessionId: activeCallSession.id });
+    await sendSignal(peerId, 'call_reject', { sessionId: activeCallSession.id });
     resetLocalCallState();
   }, [activeCallSession, updateSessionStatus, sendSignal, resetLocalCallState]);
 
@@ -340,7 +388,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
       console.error('[CALL] Error accepting call:', err);
       setPermissionError(err.name === 'NotAllowedError' ? 'Microphone permission denied.' : 'Unable to access microphone.');
       await updateSessionStatus(activeCallSession.id, 'failed', { ended_at: new Date().toISOString() });
-      sendSignal(callerId, 'call_reject', { sessionId: activeCallSession.id });
+      await sendSignal(callerId, 'call_reject', { sessionId: activeCallSession.id });
       resetLocalCallState();
     }
   }, [user, activeCallSession, sendSignal, updateSessionStatus, resetLocalCallState]);
@@ -362,7 +410,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
       duration_seconds: duration > 0 ? duration : null
     });
     
-    sendSignal(peerId, 'call_end', { sessionId: activeCallSession.id });
+    await sendSignal(peerId, 'call_end', { sessionId: activeCallSession.id });
     resetLocalCallState();
   }, [user, activeCallSession, callDuration, updateSessionStatus, sendSignal, resetLocalCallState]);
 
@@ -414,7 +462,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
         callTimeoutRef.current = setTimeout(async () => {
           console.log('[CALL] Ringing timed out. Rejecting call automatically.');
           await updateSessionStatus(payload.sessionId, 'missed', { ended_at: new Date().toISOString() });
-          sendSignal(payload.callerId, 'call_reject', { sessionId: payload.sessionId });
+          await sendSignal(payload.callerId, 'call_reject', { sessionId: payload.sessionId });
           resetLocalCallState();
         }, 30000);
       })

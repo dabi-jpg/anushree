@@ -6,7 +6,20 @@ import { ChatPage } from "./components/chat/ChatPage";
 import { AppShell } from "./components/layout/AppShell";
 import { useSessionTimeout } from "./hooks/useSessionTimeout";
 import { useAuth } from "./contexts/AuthContext";
+import { PassphraseGate } from "./components/auth/PassphraseGate";
+import { hasEncryptionKey } from "./lib/encryption";
 import { motion, AnimatePresence } from "framer-motion";
+import { useState } from "react";
+
+function ChatPassphraseWrapper({ children }: { children: React.ReactNode }) {
+  const [isUnlocked, setIsUnlocked] = useState(() => hasEncryptionKey());
+  
+  if (!isUnlocked) {
+    return <PassphraseGate onUnlocked={() => setIsUnlocked(true)} />;
+  }
+  
+  return <>{children}</>;
+}
 
 function SessionTimeoutWarning() {
   const { showWarning, remainingSeconds } = useSessionTimeout();
@@ -59,7 +72,9 @@ function App() {
           element={
             <ProtectedRoute>
               <AppShell>
-                <ChatPage />
+                <ChatPassphraseWrapper>
+                  <ChatPage />
+                </ChatPassphraseWrapper>
               </AppShell>
             </ProtectedRoute>
           }

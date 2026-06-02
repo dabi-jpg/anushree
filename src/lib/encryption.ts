@@ -96,18 +96,18 @@ export async function generateChecksum(data: string): Promise<string> {
 }
 
 /**
- * Store the derived key in sessionStorage (cleared on tab close)
+ * Store the derived key in localStorage (persists across tabs and reloads)
  */
 export async function storeEncryptionKey(passphrase: string): Promise<void> {
   // We store the passphrase, not the key (CryptoKey can't be serialized easily)
-  sessionStorage.setItem('chat_encryption_passphrase', passphrase);
+  localStorage.setItem('chat_encryption_passphrase', passphrase);
 }
 
 /**
  * Get or derive the encryption key from stored passphrase
  */
 export async function getEncryptionKey(): Promise<CryptoKey | null> {
-  const passphrase = sessionStorage.getItem('chat_encryption_passphrase');
+  const passphrase = localStorage.getItem('chat_encryption_passphrase');
   if (!passphrase) return null;
   return deriveKey(passphrase);
 }
@@ -116,14 +116,14 @@ export async function getEncryptionKey(): Promise<CryptoKey | null> {
  * Check if an encryption key is stored
  */
 export function hasEncryptionKey(): boolean {
-  return sessionStorage.getItem('chat_encryption_passphrase') !== null;
+  return localStorage.getItem('chat_encryption_passphrase') !== null;
 }
 
 /**
  * Clear the stored encryption key
  */
 export function clearEncryptionKey(): void {
-  sessionStorage.removeItem('chat_encryption_passphrase');
+  localStorage.removeItem('chat_encryption_passphrase');
 }
 
 // ---- Base64 helpers (browser-compatible) ----
