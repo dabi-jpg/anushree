@@ -36,16 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Ensure user profile and conversation member exist using direct queries
   const ensureProfileAndConversation = useCallback(async (userId: string, email: string) => {
     try {
-      console.log('[Auth] [ensureProfileAndConversation] Starting check for user:', email, 'ID:', userId);
+      console.log('[Auth] [ensureProfileAndConversation] [START]');
+      console.log('[Auth] [ensureProfileAndConversation] Step 1: Lookup profile by auth user id. User:', email, 'ID:', userId);
 
       // 1. Lookup profile by auth user id
-      console.log('[Auth] [SELECT] Querying profile table for user ID:', userId);
-      const { data: profile, error: selectError } = await supabase
+      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * starting for ID:', userId);
+      const selectPromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-      console.log('[Auth] [SELECT] Querying profile table finished. Data:', profile, 'Error:', selectError);
+      const { data: profile, error: selectError } = await selectPromise;
+      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * completed. Result:', { profile, selectError });
 
       if (selectError) {
         console.error('[Auth] Error querying profiles:', selectError);
@@ -57,15 +59,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 2. If profile does not exist: INSERT profile
       if (!currentProfile) {
         const displayName = email.split('@')[0] || email;
-        console.log('[Auth] [INSERT] Profile not found. Inserting profile for ID:', userId, 'Email:', email, 'DisplayName:', displayName);
-        const { error: insertError } = await supabase
+        console.log('[Auth] [ensureProfileAndConversation] Step 2: Profile not found. Inserting profile for ID:', userId, 'Email:', email, 'DisplayName:', displayName);
+        
+        console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.insert starting...');
+        const insertPromise = supabase
           .from('profiles')
           .insert({
             id: userId,
             email: email,
             display_name: displayName,
           });
-        console.log('[Auth] [INSERT] Insert profile query finished. Error:', insertError);
+        const { error: insertError } = await insertPromise;
+        console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.insert completed. Error:', insertError);
 
         if (insertError) {
           console.error('[Auth] Error inserting profile:', insertError.message);
@@ -73,13 +78,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 3. Fetch profile again
-        console.log('[Auth] [SELECT] Fetching profile again for user ID:', userId);
-        const { data: refetchedProfile, error: refetchError } = await supabase
+        console.log('[Auth] [ensureProfileAndConversation] Step 3: Fetching profile again for user ID:', userId);
+        console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * retry starting...');
+        const refetchPromise = supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
-        console.log('[Auth] [SELECT] Fetching profile again finished. Data:', refetchedProfile, 'Error:', refetchError);
+        const { data: refetchedProfile, error: refetchError } = await refetchPromise;
+        console.log('[Auth] [ensureProfileAndConversation] [AWAIT] profiles.select * retry completed. Result:', { refetchedProfile, refetchError });
 
         if (refetchError) {
           console.error('[Auth] Error refetching profile:', refetchError);
@@ -89,19 +96,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // 4. Ensure conversation membership check runs in the background
-      console.log('[Auth] [RPC ensure_profile_and_conversation] Start background RPC check...');
+      console.log('[Auth] [ensureProfileAndConversation] Step 4: Dispatching background conversation membership check RPC...');
+      console.log('[Auth] [ensureProfileAndConversation] [AWAIT] ensure_profile_and_conversation RPC starting...');
       supabase.rpc('ensure_profile_and_conversation' as any, {
         p_user_id: userId,
         p_email: email,
       }).then(
         ({ data, error }) => {
-          console.log('[Auth] [RPC ensure_profile_and_conversation] Finished background RPC check. Data:', data, 'Error:', error);
+          console.log('[Auth] [ensureProfileAndConversation] [RPC ensure_profile_and_conversation] Finished background RPC check. Data:', data, 'Error:', error);
         },
         (err: any) => {
-          console.error('[Auth] Background RPC check exception:', err);
+          console.error('[Auth] [ensureProfileAndConversation] Background RPC check exception:', err);
         }
       );
-
+      console.log('[Auth] [ensureProfileAndConversation] [END] Returning profile:', currentProfile);
       return currentProfile;
     } catch (err) {
       console.error('[Auth] Exception in ensureProfileAndConversation:', err);
@@ -124,8 +132,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initAuth = async () => {
       try {
-        console.log('[Auth] Fetching session...');
-        const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+        console.log('[Auth] [initAuth] Step 1: Fetching session...');
+        console.log('[Auth] [initAuth] [AWAIT] supabase.auth.getSession() starting...');
+        const sessionPromise = supabase.auth.getSession();
+        const { data: { session: currentSession }, error: sessionError } = await sessionPromise;
+        console.log('[Auth] [initAuth] [AWAIT] supabase.auth.getSession() completed. Session user:', currentSession?.user?.email, 'Error:', sessionError);
         
         if (sessionError) {
           throw sessionError;
@@ -133,15 +144,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (mounted) {
           if (currentSession?.user) {
-            console.log('[Auth] Found active user session:', currentSession.user.email);
+            console.log('[Auth] [initAuth] Found active user session:', currentSession.user.email);
             setSession(currentSession);
             setUser(currentSession.user);
 
             // Ensure profile exists and user is in the shared conversation
-            const userProfile = await ensureProfileAndConversation(
+            console.log('[Auth] [initAuth] [AWAIT] ensureProfileAndConversation starting...');
+            const profilePromise = ensureProfileAndConversation(
               currentSession.user.id,
               currentSession.user.email || ''
             );
+            const userProfile = await profilePromise;
+            console.log('[Auth] [initAuth] [AWAIT] ensureProfileAndConversation completed. Profile:', userProfile);
 
             if (mounted) {
               if (userProfile) {
@@ -153,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             }
           } else {
-            console.log('[Auth] No active session found.');
+            console.log('[Auth] [initAuth] No active session found.');
             setSession(null);
             setUser(null);
             setProfile(null);
@@ -176,19 +190,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
 
     // Listen for auth changes
+    console.log('[Auth] Setting up onAuthStateChange listener...');
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
         if (!mounted) return;
-        console.log('[Auth] onAuthStateChange event triggered:', event, newSession?.user?.email);
+        console.log('[Auth] [onAuthStateChange] triggered:', event, newSession?.user?.email);
 
         setSession(newSession);
         setUser(newSession?.user ?? null);
 
         if (newSession?.user) {
-          const userProfile = await ensureProfileAndConversation(
+          console.log('[Auth] [onAuthStateChange] [AWAIT] ensureProfileAndConversation starting...');
+          const profilePromise = ensureProfileAndConversation(
             newSession.user.id,
             newSession.user.email || ''
           );
+          const userProfile = await profilePromise;
+          console.log('[Auth] [onAuthStateChange] [AWAIT] ensureProfileAndConversation completed. Profile:', userProfile);
           if (mounted) {
             setProfile(userProfile);
             if (userProfile) {

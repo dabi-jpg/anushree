@@ -16,9 +16,12 @@ export function usePresence() {
     // Update own last_seen periodically
     const updateLastSeen = async () => {
       try {
-        await supabase.rpc('update_last_seen' as any, { p_user_id: user.id });
-      } catch {
-        // Silently fail
+        console.log('[Presence] [updateLastSeen] [AWAIT] update_last_seen RPC starting for ID:', user.id);
+        const rpcPromise = supabase.rpc('update_last_seen' as any, { p_user_id: user.id });
+        await rpcPromise;
+        console.log('[Presence] [updateLastSeen] [AWAIT] update_last_seen RPC finished.');
+      } catch (err) {
+        console.error('[Presence] [updateLastSeen] Exception:', err);
       }
     };
 
@@ -29,6 +32,7 @@ export function usePresence() {
     heartbeatRef.current = setInterval(updateLastSeen, HEARTBEAT_INTERVAL);
 
     // Track other user's presence via realtime
+    console.log('[Presence] Subscribing to global presence channel...');
     const channel = supabase
       .channel('presence:global')
       .on('presence', { event: 'sync' }, () => {
@@ -43,12 +47,16 @@ export function usePresence() {
         if (otherLeft) setIsOtherOnline(false);
       })
       .subscribe(async (status) => {
+        console.log('[Presence] realtime subscription status:', status);
         if (status === 'SUBSCRIBED') {
-          await channel.track({
+          console.log('[Presence] [subscribe] [AWAIT] channel.track starting...');
+          const trackPromise = channel.track({
             userId: user.id,
             displayName: profile?.display_name || 'User',
             onlineAt: new Date().toISOString(),
           });
+          await trackPromise;
+          console.log('[Presence] [subscribe] [AWAIT] channel.track completed.');
         }
       });
 
@@ -62,12 +70,15 @@ export function usePresence() {
   const fetchOtherLastSeen = useCallback(async () => {
     if (!user) return;
 
-    const { data } = await supabase
+    console.log('[Presence] [fetchOtherLastSeen] [AWAIT] profiles.select starting...');
+    const selectPromise = supabase
       .from('profiles')
       .select('last_seen')
       .neq('id', user.id)
       .limit(1)
       .single();
+    const { data } = await selectPromise;
+    console.log('[Presence] [fetchOtherLastSeen] [AWAIT] profiles.select completed. Result:', data);
 
     if (data) {
       setOtherLastSeen((data as any).last_seen);

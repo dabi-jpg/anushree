@@ -29,12 +29,16 @@ export function useChat() {
 
     const fetchConversation = async () => {
       try {
-        const { data, error } = await supabase
+        console.log('[Chat] [fetchConversation] [START] user ID:', user.id);
+        console.log('[Chat] [fetchConversation] [AWAIT] conversation_members select starting...');
+        const selectPromise = supabase
           .from('conversation_members')
           .select('conversation_id')
           .eq('user_id', user.id)
           .limit(1)
           .single();
+        const { data, error } = await selectPromise;
+        console.log('[Chat] [fetchConversation] [AWAIT] conversation_members select finished. Result:', { data, error });
 
         if (error) {
           console.error('[Chat] Error fetching conversation membership:', error);
@@ -71,9 +75,18 @@ export function useChat() {
   const decryptMessage = useCallback(async (content: string | null): Promise<string> => {
     if (!content) return '';
     try {
-      const key = await getEncryptionKey();
+      console.log('[Chat] [decryptMessage] [START]');
+      console.log('[Chat] [decryptMessage] [AWAIT] getEncryptionKey starting...');
+      const keyPromise = getEncryptionKey();
+      const key = await keyPromise;
+      console.log('[Chat] [decryptMessage] [AWAIT] getEncryptionKey completed. Key exists:', !!key);
       if (!key) return content;
-      return await decrypt(content, key);
+      
+      console.log('[Chat] [decryptMessage] [AWAIT] decrypt starting...');
+      const decryptPromise = decrypt(content, key);
+      const decrypted = await decryptPromise;
+      console.log('[Chat] [decryptMessage] [AWAIT] decrypt completed.');
+      return decrypted;
     } catch (err) {
       console.error('[Chat] Decryption exception:', err);
       return content;
@@ -107,7 +120,10 @@ export function useChat() {
         query = query.lt('created_at', before);
       }
 
-      const { data, error } = await query;
+      console.log('[Chat] [fetchMessages] [AWAIT] messages select query starting...');
+      const queryPromise = query;
+      const { data, error } = await queryPromise;
+      console.log('[Chat] [fetchMessages] [AWAIT] messages select query completed. Count:', data?.length, 'Error:', error);
 
       if (error) {
         console.error('[Chat] Error loading messages from database:', error);
@@ -134,8 +150,10 @@ export function useChat() {
       }
 
       // Decrypt messages
-      const decryptedMessages = await Promise.all(
+      console.log('[Chat] [fetchMessages] [AWAIT] decrypting messages via Promise.all starting...');
+      const decryptPromise = Promise.all(
         (data as any[]).map(async (msg) => {
+          console.log('[Chat] [fetchMessages] Decrypting message ID:', msg.id);
           const decryptedContent = msg.message_type === 'text'
             ? await decryptMessage(msg.content)
             : msg.content;
@@ -148,6 +166,8 @@ export function useChat() {
           } as MessageWithAttachment;
         })
       );
+      const decryptedMessages = await decryptPromise;
+      console.log('[Chat] [fetchMessages] [AWAIT] decrypting messages via Promise.all finished. Count:', decryptedMessages.length);
 
       if (mountedRef.current) {
         if (before) {
@@ -194,18 +214,23 @@ export function useChat() {
 
           try {
             // Fetch attachments for this message
-            const { data: attachments, error } = await supabase
+            console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments starting...');
+            const attachmentPromise = supabase
               .from('attachments')
               .select('*')
               .eq('message_id', newMsg.id);
+            const { data: attachments, error } = await attachmentPromise;
+            console.log('[Chat] [realtime INSERT] [AWAIT] fetching attachments finished. Result:', { attachments, error });
 
             if (error) {
               console.error('[Chat] Error fetching realtime message attachments:', error);
             }
 
+            console.log('[Chat] [realtime INSERT] [AWAIT] decrypting message starting...');
             const decryptedContent = newMsg.message_type === 'text'
               ? await decryptMessage(newMsg.content)
               : newMsg.content;
+            console.log('[Chat] [realtime INSERT] [AWAIT] decrypting message finished.');
 
             const fullMessage: MessageWithAttachment = {
               ...newMsg,
