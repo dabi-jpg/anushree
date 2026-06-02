@@ -131,18 +131,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize auth state with 10s timeout
+  // Initialize auth state
   useEffect(() => {
     let mounted = true;
     console.log('[Auth] Initializing auth state. Retry trigger:', retryTrigger);
-
-    const timeoutId = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.warn('[Auth] Initialization timed out after 10s.');
-        setInitError('Connection timed out. Please check your network connection.');
-        setIsLoading(false);
-      }
-    }, 10000);
 
     const initAuth = async () => {
       try {
@@ -174,11 +166,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (mounted) {
               if (userProfile) {
                 setProfile(userProfile);
-                setInitError(null);
               } else {
-                console.error('[Auth] Failed to initialize profile/conversation.');
-                setInitError('Could not load or create your profile. Please verify your account setup.');
+                console.warn('[Auth] ensureProfileAndConversation returned null. Setting default fallback profile.');
+                setProfile({
+                  id: currentSession.user.id,
+                  email: currentSession.user.email || '',
+                  display_name: (currentSession.user.email || '').split('@')[0] || 'User',
+                  avatar_url: null,
+                  created_at: new Date().toISOString(),
+                  last_seen: new Date().toISOString(),
+                  status: 'offline'
+                });
               }
+              setInitError(null);
             }
           } else {
             console.log('[Auth] [initAuth] No active session found.');
@@ -194,7 +194,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } finally {
         if (mounted) {
-          clearTimeout(timeoutId);
           setIsLoading(false);
           console.log('[Auth] Initial loading state cleared.');
         }
@@ -222,12 +221,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userProfile = await profilePromise;
           console.log('[Auth] [onAuthStateChange] [AWAIT] ensureProfileAndConversation completed. Profile:', userProfile);
           if (mounted) {
-            setProfile(userProfile);
             if (userProfile) {
-              setInitError(null);
+              setProfile(userProfile);
             } else {
-              setInitError('Could not load or create your profile.');
+              setProfile({
+                id: newSession.user.id,
+                email: newSession.user.email || '',
+                display_name: (newSession.user.email || '').split('@')[0] || 'User',
+                avatar_url: null,
+                created_at: new Date().toISOString(),
+                last_seen: new Date().toISOString(),
+                status: 'offline'
+              });
             }
+            setInitError(null);
           }
         } else {
           setProfile(null);
@@ -244,7 +251,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
       subscription.unsubscribe();
       console.log('[Auth] Auth initialization cleanup.');
     };
@@ -291,12 +297,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     console.log('[Auth] Executing signOut.');
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('[Auth] Error during supabase.auth.signOut:', err);
+    }
+    localStorage.clear();
+    sessionStorage.clear();
     setUser(null);
     setProfile(null);
     setSession(null);
     setInitError(null);
-    sessionStorage.removeItem('chat_encryption_key');
+    window.location.href = '/login';
   }, []);
 
   return (

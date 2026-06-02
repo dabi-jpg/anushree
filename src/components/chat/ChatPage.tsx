@@ -6,8 +6,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useChat } from '../../hooks/useChat';
 import { useTyping } from '../../hooks/useTyping';
 import { usePresence } from '../../hooks/usePresence';
-import { PassphraseGate } from '../auth/PassphraseGate';
-import { hasEncryptionKey } from '../../lib/encryption';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { supabase } from '../../lib/supabase';
@@ -16,7 +14,6 @@ import type { Profile } from '../../types/database';
 export const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  const [isUnlocked, setIsUnlocked] = useState(hasEncryptionKey());
   const [otherProfile, setOtherProfile] = useState<Profile | null>(null);
 
   const {
@@ -104,10 +101,7 @@ export const ChatPage: React.FC = () => {
     return 'Offline';
   };
 
-  // Show passphrase gate if not unlocked
-  if (!isUnlocked) {
-    return <PassphraseGate onUnlocked={() => setIsUnlocked(true)} />;
-  }
+
 
   return (
     <div className="min-h-screen bg-cream flex flex-col max-w-[700px] mx-auto relative">
