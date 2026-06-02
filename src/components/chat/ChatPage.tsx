@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Phone } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import { useChat } from '../../hooks/useChat';
 import { useTyping } from '../../hooks/useTyping';
 import { usePresence } from '../../hooks/usePresence';
+import { useVoiceCall } from '../../contexts/VoiceCallContext';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { supabase } from '../../lib/supabase';
@@ -14,6 +15,7 @@ import type { Profile } from '../../types/database';
 export const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
+  const { initiateCall } = useVoiceCall();
   const [otherProfile, setOtherProfile] = useState<Profile | null>(null);
 
   const {
@@ -154,6 +156,25 @@ export const ChatPage: React.FC = () => {
               Encrypted
             </span>
           </div>
+
+          {/* Phone Call Button */}
+          {otherProfile && (
+            <button
+              onClick={() => {
+                if (!isOtherOnline) {
+                  if (window.confirm(`${otherProfile.display_name} appears offline. Call anyway?`)) {
+                    initiateCall(otherProfile.id);
+                  }
+                } else {
+                  initiateCall(otherProfile.id);
+                }
+              }}
+              className="p-2 bg-teal-accent hover:bg-pink-primary text-white border-2 border-teal-accent hover:border-pink-primary transition-all duration-200 rounded-xl cursor-pointer shadow-retro-teal-sm hover:shadow-retro-pink-sm active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center"
+              title={`Call ${otherProfile.display_name}`}
+            >
+              <Phone size={16} />
+            </button>
+          )}
         </div>
       </motion.header>
 
