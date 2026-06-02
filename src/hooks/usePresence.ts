@@ -76,7 +76,7 @@ export function usePresence() {
       .select('last_seen')
       .neq('id', user.id)
       .limit(1)
-      .single();
+      .maybeSingle();
     const { data } = await selectPromise;
     console.log('[Presence] [fetchOtherLastSeen] [AWAIT] profiles.select completed. Result:', data);
 

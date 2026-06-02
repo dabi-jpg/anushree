@@ -45,10 +45,15 @@ export const ChatPage: React.FC = () => {
           .select('*')
           .neq('id', user.id)
           .limit(1)
-          .single();
+          .maybeSingle();
 
         if (error) {
           console.error('[ChatPage] Error fetching other user profile:', error);
+          return;
+        }
+
+        if (!data) {
+          console.log('[ChatPage] Other user profile does not exist yet.');
           return;
         }
 
