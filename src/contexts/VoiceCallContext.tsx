@@ -87,10 +87,13 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
 
   // Send a signal broadcast helper
   const sendSignal = useCallback(async (peerId: string, event: string, payload: any) => {
-    console.log(`[CALL] [SIGNALING] Sending signal: "${event}" to peer: ${peerId}. SessionId: ${payload.sessionId}. SenderId: ${user?.id}`);
-    const peerChannel = supabase.channel(`calls:${peerId}`);
+    const targetChannel = `calls:${peerId}`;
+    console.log(`[CALL] [SIGNALING] Preparing signal: "${event}" to peer: ${peerId}. SessionId: ${payload.sessionId}. SenderId: ${user?.id}. Channel name used: ${targetChannel}. Payload:`, payload);
+    const peerChannel = supabase.channel(targetChannel);
     peerChannel.subscribe((status) => {
+      console.log(`[CALL] [SIGNALING] sendSignal subscribe status: ${status} for channel: ${targetChannel}`);
       if (status === 'SUBSCRIBED') {
+        console.log(`[CALL] [SIGNALING] Channel ${targetChannel} SUBSCRIBED. Dispatching payload...`);
         peerChannel.send({
           type: 'broadcast',
           event,
@@ -99,8 +102,11 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
             ...payload
           }
         }).then(() => {
-          console.log(`[CALL] [SIGNALING] Signal broadcast success: "${event}" to peer: ${peerId}`);
-          supabase.removeChannel(peerChannel);
+          console.log(`[CALL] [SIGNALING] Signal broadcast success: "${event}" to peer: ${peerId}. Queueing channel removal after 1000ms...`);
+          setTimeout(() => {
+            console.log(`[CALL] [SIGNALING] Removing sender channel subscription for: ${targetChannel}`);
+            supabase.removeChannel(peerChannel);
+          }, 1000);
         });
       }
     });
@@ -127,15 +133,17 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     resetLocalCallState();
     setCallState('calling');
-    console.log(`[CALL] [START] Initiating call to receiver: ${receiverId}`);
+    console.log(`[CALL] [START] Initiating call. Caller ID (Sender): ${user.id}, Recipient ID Selected: ${receiverId}, Channel name: calls:${receiverId}`);
 
     try {
       // 1. Fetch peer profile
+      console.log(`[CALL] [START] Fetching recipient profile...`);
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', receiverId)
         .maybeSingle();
+      console.log(`[CALL] [START] Recipient profile response:`, profile);
       setPeerProfile(profile);
 
       // 2. Request mic permission
@@ -146,6 +154,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
       setPermissionError(null);
 
       // 3. Create call session row in database
+      console.log(`[CALL] [START] Creating call_sessions database row...`);
       const { data: session, error: dbError } = await supabase
         .from('call_sessions')
         .insert({
@@ -161,6 +170,7 @@ export function VoiceCallProvider({ children }: { children: React.ReactNode }) {
         resetLocalCallState();
         return;
       }
+      console.log(`[CALL] [START] call_sessions row created successfully. Session ID: ${session.id}, status: ${session.status}`);
       setActiveCallSession(session);
 
       // 4. Initialize RTCPeerConnection
